@@ -66,7 +66,7 @@ export function render(diagram: Diagram): string {
   if (diagramBg !== undefined) {
     out += `<rect width="100%" height="100%" fill="${diagramBg}"/>`;
   }
-  out += relationshipsSvg(placed, diagram.relationships);
+  out += relationshipsSvg(placed, diagram);
   for (const p of placed) {
     out += cardSvg(p);
   }
@@ -84,12 +84,17 @@ function defs(): string {
   );
 }
 
-function relationshipsSvg(placed: Placed[], rels: Relationship[]): string {
+// a connector is a polyline through these points; two points make the
+// straight style, more make elbows (from @line(ortho) or @via corners)
+type Route = [number, number][];
+type LineStyle = "straight" | "ortho";
+
+function relationshipsSvg(placed: Placed[], diagram: Diagram): string {
   const byName = new Map<string, Placed>();
   for (const p of placed) byName.set(p.block.name, p);
 
   // only inheritance-like relationships are drawn for now, and only when both endpoints resolve to placed blocks
-  const valid = rels
+  const valid = diagram.relationships
     .filter(
       (r) =>
         r.kind === RelationshipKind.Inheritance ||
@@ -104,6 +109,8 @@ function relationshipsSvg(placed: Placed[], rels: Relationship[]): string {
     incoming.set(rel.to, list);
   }
 
+  const defaultStyle = findLineStyle(diagram.annotations) ?? "straight";
+
   let out = "";
   for (const rel of valid) {
     const from = byName.get(rel.from)!;
@@ -111,27 +118,123 @@ function relationshipsSvg(placed: Placed[], rels: Relationship[]): string {
 
     const arrivals = incoming.get(rel.to)!;
     const idx = Math.max(arrivals.indexOf(rel.from), 0);
-    const [x2, y2] = arrivalPoint(to, idx, arrivals.length);
-    const [x1, y1] = edgeIntersection(from, x2, y2);
+    const route = routeFor(rel, from, to, idx, arrivals.length, defaultStyle);
+    const points = route.map(([x, y]) => `${x},${y}`).join(" ");
 
     const dash =
       rel.kind === RelationshipKind.Realization
         ? ` stroke-dasharray="6,4"`
         : "";
 
-    out += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${ARROW_COLOR}" stroke-width="1.5"${dash} marker-end="url(#inherit)"/>`;
+    out += `<polyline points="${points}" fill="none" stroke="${ARROW_COLOR}" stroke-width="1.5"${dash} marker-end="url(#inherit)"/>`;
   }
   return out;
 }
 
-// incoming edges spread along the bottom of the target card so multiple children never converge on the same point
+// route precedence: user corners from @via win, then the relationship's own
+// @line style, then the diagram-level @line default
+function routeFor(
+  rel: Relationship,
+  from: Placed,
+  to: Placed,
+  index: number,
+  total: number,
+  defaultStyle: LineStyle,
+): Route {
+  const via = findPoints(rel.annotations, "via");
+  if (via.length > 0) {
+    const [fx, fy] = via[0];
+    const [lx, ly] = via[via.length - 1];
+    // endpoints stay glued to the card borders: the user owns the corners,
+    // the renderer owns where the line meets each block
+    const start = edgeIntersection(from, fx, fy);
+    const end = arrivalPoint(to, lx, ly, index, total);
+    return dedupe([start, ...via, end]);
+  }
+  const style = findLineStyle(rel.annotations) ?? defaultStyle;
+  return style === "ortho"
+    ? routeOrtho(from, to, index, total)
+    : routeStraight(from, to, index, total);
+}
+
+function routeStraight(
+  from: Placed,
+  to: Placed,
+  index: number,
+  total: number,
+): Route {
+  const [fx, fy] = cardCenter(from);
+  const end = arrivalPoint(to, fx, fy, index, total);
+  const start = edgeIntersection(from, end[0], end[1]);
+  return [start, end];
+}
+
+// axis-aligned elbow between the facing edges: vertical-horizontal-vertical
+// when the blocks are stacked, horizontal-vertical-horizontal side by side
+function routeOrtho(
+  from: Placed,
+  to: Placed,
+  index: number,
+  total: number,
+): Route {
+  const frac = (index + 1) / (total + 1);
+  const [cx, cy] = cardCenter(to);
+  const [fx, fy] = cardCenter(from);
+  const dx = fx - cx;
+  const dy = fy - cy;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    const x1 = dx > 0 ? from.x : from.x + from.w;
+    const x2 = dx > 0 ? to.x + to.w : to.x;
+    const y2 = to.y + totalH(to) * frac;
+    const midX = (x1 + x2) / 2;
+    return dedupe([
+      [x1, fy],
+      [midX, fy],
+      [midX, y2],
+      [x2, y2],
+    ]);
+  }
+  const y1 = dy > 0 ? from.y : from.y + totalH(from);
+  const y2 = dy > 0 ? to.y + totalH(to) : to.y;
+  const x2 = to.x + to.w * frac;
+  const midY = (y1 + y2) / 2;
+  return dedupe([
+    [fx, y1],
+    [fx, midY],
+    [x2, midY],
+    [x2, y2],
+  ]);
+}
+
+function dedupe(route: Route): Route {
+  const out: Route = [];
+  for (const p of route) {
+    const last = out[out.length - 1];
+    if (last === undefined || last[0] !== p[0] || last[1] !== p[1]) {
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+// incoming edges land on whichever edge of the target faces the given
+// point, spread along that edge so multiple arrivals never converge
 function arrivalPoint(
   p: Placed,
+  towardX: number,
+  towardY: number,
   index: number,
   total: number,
 ): [number, number] {
   const frac = (index + 1) / (total + 1);
-  return [p.x + p.w * frac, p.y + totalH(p)];
+  const [cx, cy] = cardCenter(p);
+  const dx = towardX - cx;
+  const dy = towardY - cy;
+  const h = totalH(p);
+  if (Math.abs(dx) > Math.abs(dy)) {
+    return [dx > 0 ? p.x + p.w : p.x, p.y + h * frac];
+  }
+  return [p.x + p.w * frac, dy > 0 ? p.y + h : p.y];
 }
 
 function cardCenter(p: Placed): [number, number] {
@@ -355,8 +458,24 @@ function findNumber(anns: Annotation[], name: string): number | undefined {
 
 function findColor(anns: Annotation[], name: string): string | undefined {
   const arg = findAnnotation(anns, name)?.args[0];
-  if (arg === undefined || arg.kind === "number") return undefined;
+  if (arg === undefined || arg.kind === "number" || arg.kind === "point") {
+    return undefined;
+  }
   return arg.value;
+}
+
+function findLineStyle(anns: Annotation[]): LineStyle | undefined {
+  const arg = findAnnotation(anns, "line")?.args[0];
+  if (arg?.kind === "ident" && (arg.value === "straight" || arg.value === "ortho")) {
+    return arg.value;
+  }
+  return undefined;
+}
+
+function findPoints(anns: Annotation[], name: string): [number, number][] {
+  const a = findAnnotation(anns, name);
+  if (a === undefined) return [];
+  return a.args.filter((arg) => arg.kind === "point").map((arg) => arg.value);
 }
 
 function argAsNumber(arg: AnnotationArg | undefined): number | undefined {

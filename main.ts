@@ -16,11 +16,11 @@ class User @pos(40, 40) @bg(#eef) {
     # greet(other: User): Void
 }
 
-class Admin @pos(340, 40) @bg(#efe) {
+class Admin @pos(540, 40) @bg(#efe) {
     + role: String
 }
 
-Admin --|> User
+Admin --|> User @line(ortho)
 User --> Post : "writes"
 note "admins can edit" -> Admin
 `;

@@ -180,6 +180,20 @@ Deno.test(function keywordsAreFineOutsideItemPosition() {
   assertEquals(members[1].params?.[0].name, "region");
 });
 
+Deno.test(function parsesPointAnnotationArgs() {
+  const d = parse("A --|> B @via((50,40), (67,0)) @line(ortho)");
+  const anns = d.relationships[0].annotations;
+  assertEquals(anns[0].args, [
+    { kind: "point", value: [50, 40] },
+    { kind: "point", value: [67, 0] },
+  ]);
+  assertEquals(anns[1].args, [{ kind: "ident", value: "ortho" }]);
+});
+
+Deno.test(function pointArgsRejectMissingCoordinate() {
+  assertThrows(() => parse("A --|> B @via((50))"), ParseError, 'expected ","');
+});
+
 Deno.test(function errorsCarryLineAndColumn() {
   const err = assertThrows(() => parse("class Foo {"), ParseError);
   assertEquals(err.message, "expected identifier at line 1, column 12");

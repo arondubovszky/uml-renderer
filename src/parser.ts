@@ -237,12 +237,23 @@ class Parser {
     const c = this.src[this.pos];
     if (c === "#") return { kind: "hex", value: this.parseHexColor() };
     if (c === '"') return { kind: "str", value: this.parseString() };
+    if (c === "(") return { kind: "point", value: this.parsePoint() };
     if (c === "-" || isDigit(c))
       return { kind: "number", value: this.parseNumber() };
     if (isIdentStart(c)) return { kind: "ident", value: this.parseIdent() };
     throw this.error(
-      "expected annotation argument (color, string, number or identifier)",
+      "expected annotation argument (color, string, number, identifier or point)",
     );
+  }
+
+  // point arg like (50, 40), used by @via
+  private parsePoint(): [number, number] {
+    this.expect("(");
+    const x = this.parseNumber();
+    this.expect(",");
+    const y = this.parseNumber();
+    this.expect(")");
+    return [x, y];
   }
 
   // token-level parsers. each one skips leading trivia itself, so the

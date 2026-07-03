@@ -178,7 +178,8 @@ export type AnnotationArg =
   | { kind: "hex"; value: string } // #eef
   | { kind: "str"; value: string } // "quoted text"
   | { kind: "number"; value: number } // 10, 20.5
-  | { kind: "ident"; value: string }; // red
+  | { kind: "ident"; value: string } // red
+  | { kind: "point"; value: [number, number] }; // (50, 40)
 
 export class Annotation {
   public name: string;
