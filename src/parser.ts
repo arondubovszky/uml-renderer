@@ -5,6 +5,7 @@ import {
   Diagram,
   Member,
   Note,
+  NumExpr,
   Param,
   Region,
   Relationship,
@@ -74,6 +75,23 @@ class Parser {
     const relKind = this.tryRelOp();
     if (relKind !== undefined) {
       diagram.relationships.push(this.parseRelationship(first, relKind, start));
+      return;
+    }
+    // a dot after the ident can only be a member-qualified relationship
+    // source like "User.posts --> Post" (the "..>" operator was already
+    // consumed above, so a single dot is unambiguous here)
+    if (this.at(".")) {
+      this.expect(".");
+      const memberName = this.parseIdent();
+      const qualifiedKind = this.tryRelOp();
+      if (qualifiedKind === undefined) {
+        throw this.error(
+          `expected relationship operator after "${first}.${memberName}"`,
+        );
+      }
+      diagram.relationships.push(
+        this.parseRelationship(first, qualifiedKind, start, memberName),
+      );
       return;
     }
     diagram.blocks.push(this.parseBlock(first, start));
@@ -150,14 +168,18 @@ class Parser {
     return new TypeRef(name, generic);
   }
 
-  // relationship = from rel_op to (: "label")? annotation*
-  // the from ident and operator were already consumed by parseItem
+  // relationship = from(.member)? rel_op to (: "label")? annotation*
+  // the source, optional qualifier and operator were consumed by parseItem
   private parseRelationship(
     from: string,
     kind: RelationshipKind,
     start: number,
+    fromMember?: string,
   ): Relationship {
     const to = this.parseIdent();
+    if (this.at(".") && !this.at("..")) {
+      throw this.error("member qualifiers are only allowed on the source side");
+    }
     let label: string | undefined;
     if (this.eat(":")) {
       label = this.parseString();
@@ -170,6 +192,7 @@ class Parser {
       label,
       annotations,
       this.spanFrom(start),
+      fromMember,
     );
   }
 
@@ -237,23 +260,108 @@ class Parser {
     const c = this.src[this.pos];
     if (c === "#") return { kind: "hex", value: this.parseHexColor() };
     if (c === '"') return { kind: "str", value: this.parseString() };
-    if (c === "(") return { kind: "point", value: this.parsePoint() };
-    if (c === "-" || isDigit(c))
-      return { kind: "number", value: this.parseNumber() };
-    if (isIdentStart(c)) return { kind: "ident", value: this.parseIdent() };
+    if (c === "(") return this.parseParenArg();
+    if (c === "-" || isDigit(c)) {
+      const expr = this.parseNumExpr();
+      // a bare literal stays a plain number arg
+      return expr.op === "num"
+        ? { kind: "number", value: expr.value }
+        : { kind: "expr", value: expr };
+    }
+    if (isIdentStart(c)) {
+      // an ident followed by "(" is a geometry call like width(User),
+      // otherwise it is a plain ident arg like red
+      if (this.atCall()) return { kind: "expr", value: this.parseNumExpr() };
+      return { kind: "ident", value: this.parseIdent() };
+    }
     throw this.error(
-      "expected annotation argument (color, string, number, identifier or point)",
+      "expected annotation argument (color, string, number, expression, identifier or point)",
     );
   }
 
-  // point arg like (50, 40), used by @via
-  private parsePoint(): [number, number] {
+  // "(" opens either a point arg like (50, 40) or a parenthesized
+  // expression like (2+3)*4: a comma after the first expression makes it
+  // a point
+  private parseParenArg(): AnnotationArg {
     this.expect("(");
-    const x = this.parseNumber();
-    this.expect(",");
-    const y = this.parseNumber();
+    const first = this.parseNumExpr();
+    if (this.eat(",")) {
+      const y = this.parseNumExpr();
+      this.expect(")");
+      return { kind: "point", value: [first, y] };
+    }
     this.expect(")");
-    return [x, y];
+    const expr = this.parseNumExpr(first);
+    return expr.op === "num"
+      ? { kind: "number", value: expr.value }
+      : { kind: "expr", value: expr };
+  }
+
+  // expr = term (("+" | "-") term)*
+  // an already-parsed factor can be passed in to continue after a
+  // parenthesized expression, e.g. the *4 in (2+3)*4
+  private parseNumExpr(initial?: NumExpr): NumExpr {
+    let left = this.parseNumTerm(initial);
+    for (;;) {
+      if (this.eat("+")) {
+        left = { op: "+", left, right: this.parseNumTerm() };
+      } else if (this.eat("-")) {
+        left = { op: "-", left, right: this.parseNumTerm() };
+      } else {
+        return left;
+      }
+    }
+  }
+
+  // term = factor (("*" | "/") factor)*
+  private parseNumTerm(initial?: NumExpr): NumExpr {
+    let left = initial ?? this.parseNumFactor();
+    for (;;) {
+      if (this.eat("*")) {
+        left = { op: "*", left, right: this.parseNumFactor() };
+      } else if (this.eat("/")) {
+        left = { op: "/", left, right: this.parseNumFactor() };
+      } else {
+        return left;
+      }
+    }
+  }
+
+  // factor = "-" factor | "(" expr ")" | number | fn "(" block ")"
+  private parseNumFactor(): NumExpr {
+    this.skip();
+    if (this.eat("-")) {
+      return {
+        op: "-",
+        left: { op: "num", value: 0 },
+        right: this.parseNumFactor(),
+      };
+    }
+    if (this.eat("(")) {
+      const inner = this.parseNumExpr();
+      this.expect(")");
+      return inner;
+    }
+    if (isDigit(this.src[this.pos])) {
+      return { op: "num", value: this.parseNumber() };
+    }
+    if (isIdentStart(this.src[this.pos])) {
+      const fn = this.parseIdent();
+      this.expect("(");
+      const block = this.parseIdent();
+      this.expect(")");
+      return { op: "ref", fn, block };
+    }
+    throw this.error("expected number or geometry call like width(Block)");
+  }
+
+  // lookahead: does an ident followed by "(" start here?
+  private atCall(): boolean {
+    this.skip();
+    let i = this.pos;
+    if (!isIdentStart(this.src[i])) return false;
+    while (i < this.src.length && isIdentChar(this.src[i])) i++;
+    return this.src[i] === "(";
   }
 
   // token-level parsers. each one skips leading trivia itself, so the

@@ -112,6 +112,9 @@ export class Relationship {
   // block names as written in the source; resolved to blocks by validate/render
   public from: string;
   public to: string;
+  // member on the source block that carries this relationship,
+  // from the qualified form "User.posts --> Post"
+  public fromMember?: string;
   public kind: RelationshipKind;
   public label?: string;
   public annotations: Annotation[];
@@ -124,6 +127,7 @@ export class Relationship {
     label?: string,
     annotations: Annotation[] = [],
     span: Span = EMPTY_SPAN,
+    fromMember?: string,
   ) {
     this.from = from;
     this.to = to;
@@ -131,6 +135,7 @@ export class Relationship {
     this.label = label;
     this.annotations = annotations;
     this.span = span;
+    this.fromMember = fromMember;
   }
 }
 
@@ -174,12 +179,21 @@ export class Region {
   }
 }
 
+// numeric expression usable wherever an annotation takes a number, e.g.
+// @via((right(User)+24, cy(User))). refs name a geometry function and a
+// block, and resolve against the laid-out blocks at render time
+export type NumExpr =
+  | { op: "num"; value: number }
+  | { op: "ref"; fn: string; block: string } // width(User)
+  | { op: "+" | "-" | "*" | "/"; left: NumExpr; right: NumExpr };
+
 export type AnnotationArg =
   | { kind: "hex"; value: string } // #eef
   | { kind: "str"; value: string } // "quoted text"
   | { kind: "number"; value: number } // 10, 20.5
   | { kind: "ident"; value: string } // red
-  | { kind: "point"; value: [number, number] }; // (50, 40)
+  | { kind: "expr"; value: NumExpr } // width(User)+20
+  | { kind: "point"; value: [NumExpr, NumExpr] }; // (50, 40)
 
 export class Annotation {
   public name: string;

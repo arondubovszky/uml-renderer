@@ -4,7 +4,10 @@ import {
   Block,
   Diagram,
   Member,
+  Note,
+  NumExpr,
   Param,
+  Region,
   Relationship,
   RelationshipKind,
   TypeRef,
@@ -12,15 +15,17 @@ import {
 } from "./ir.ts";
 
 const DEFAULT_W = 280;
-const MARGIN = 20;
+const MARGIN = 40;
 const GAP = 24;
 const CORNER = 10;
 
 // << >>
-const STEREOTYPE_SIZE = 12;
+const STEREOTYPE_SIZE = 14;
 const NAME_SIZE = 18;
 const MEMBER_SIZE = 13;
 const MONO_CHAR_RATIO = 0.62;
+// average glyph width of the sans stack, used to size note boxes
+const SANS_CHAR_RATIO = 0.55;
 
 const HEADER_PAD_TOP = 16;
 const HEADER_PAD_BOTTOM = 16;
@@ -37,7 +42,21 @@ const DEFAULT_STROKE = "#3f4046";
 const DEFAULT_TEXT = "#000";
 const STEREOTYPE_COLOR = "#8a8d95";
 const ARROW_COLOR = "#6a6d75";
-const MARKER_FILL = "#111214";
+const LABEL_SIZE = 11;
+
+const NOTE_FILL = "#fff8c5";
+const NOTE_STROKE = "#d4b106";
+const NOTE_TEXT = "#57534e";
+const NOTE_SIZE = 12;
+const NOTE_LINE_H = 18;
+const NOTE_PAD = 10;
+const NOTE_MAX_CHARS = 32;
+
+const REGION_PAD = 16;
+const REGION_LABEL_SIZE = 12;
+
+// spacing between hubs of different relationship kinds at the same spot
+const HUB_TYPE_GAP = 8;
 
 interface Placed {
   block: Block;
@@ -58,27 +77,54 @@ function totalH(p: Placed): number {
 
 export function render(diagram: Diagram): string {
   const placed = layout(diagram);
-  const [vw, vh] = viewport(placed);
+  const byName = new Map<string, Placed>();
+  for (const p of placed) byName.set(p.block.name, p);
+
+  const regions = layoutRegions(diagram.regions, byName);
+  const notes = layoutNotes(diagram.notes, byName, placed);
+  const [vw, vh] = viewport(placed, notes, regions);
   const diagramBg = findColor(diagram.annotations, "bg");
 
   let out = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vw} ${vh}" width="${vw}" height="${vh}">`;
-  out += defs();
+  // hollow markers (inheritance triangle, aggregation diamond) are filled
+  // with the page background so they read as outlines
+  out += defs(diagramBg ?? "#fff");
   if (diagramBg !== undefined) {
     out += `<rect width="100%" height="100%" fill="${diagramBg}"/>`;
   }
-  out += relationshipsSvg(placed, diagram);
+  // paint order: region areas at the back, then connectors, then cards so
+  // lines never cover content, then notes on top
+  for (const r of regions) {
+    out += regionSvg(r);
+  }
+  out += relationshipsSvg(byName, diagram);
+  for (const n of notes) {
+    if (n.target !== undefined) out += noteConnectorSvg(n);
+  }
   for (const p of placed) {
     out += cardSvg(p);
+  }
+  for (const n of notes) {
+    out += noteSvg(n);
   }
   out += "</svg>";
   return out;
 }
 
-function defs(): string {
+function defs(hollowFill: string): string {
   return (
     `<defs>` +
     `<marker id="inherit" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">` +
-    `<path d="M 0 0 L 10 5 L 0 10 z" fill="${MARKER_FILL}" stroke="${ARROW_COLOR}" stroke-width="1"/>` +
+    `<path d="M 0 0 L 10 5 L 0 10 z" fill="${hollowFill}" stroke="${ARROW_COLOR}" stroke-width="1"/>` +
+    `</marker>` +
+    `<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">` +
+    `<path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="${ARROW_COLOR}" stroke-width="1.5"/>` +
+    `</marker>` +
+    `<marker id="diamond" viewBox="0 0 14 8" refX="13" refY="4" markerWidth="14" markerHeight="8" orient="auto-start-reverse">` +
+    `<path d="M 1 4 L 7 1 L 13 4 L 7 7 z" fill="${hollowFill}" stroke="${ARROW_COLOR}" stroke-width="1"/>` +
+    `</marker>` +
+    `<marker id="diamond-filled" viewBox="0 0 14 8" refX="13" refY="4" markerWidth="14" markerHeight="8" orient="auto-start-reverse">` +
+    `<path d="M 1 4 L 7 1 L 13 4 L 7 7 z" fill="${ARROW_COLOR}" stroke="${ARROW_COLOR}" stroke-width="1"/>` +
     `</marker>` +
     `</defs>`
   );
@@ -89,121 +135,236 @@ function defs(): string {
 type Route = [number, number][];
 type LineStyle = "straight" | "ortho";
 
-function relationshipsSvg(placed: Placed[], diagram: Diagram): string {
-  const byName = new Map<string, Placed>();
-  for (const p of placed) byName.set(p.block.name, p);
+// a hub is a fixed attachment point on a card edge. axis is the direction
+// a connector leaves it in (vertical for top/bottom hubs, horizontal for
+// side hubs) and decides the ortho elbow shape
+interface Hub {
+  x: number;
+  y: number;
+  axis: "v" | "h";
+}
 
-  // only inheritance-like relationships are drawn for now, and only when both endpoints resolve to placed blocks
-  const valid = diagram.relationships
-    .filter(
-      (r) =>
-        r.kind === RelationshipKind.Inheritance ||
-        r.kind === RelationshipKind.Realization,
-    )
-    .filter((r) => byName.has(r.from) && byName.has(r.to));
+function relationshipsSvg(
+  byName: Map<string, Placed>,
+  diagram: Diagram,
+): string {
+  const valid = diagram.relationships.filter(
+    (r) => byName.has(r.from) && byName.has(r.to),
+  );
 
-  const incoming = new Map<string, string[]>();
-  for (const rel of valid) {
-    const list = incoming.get(rel.to) ?? [];
-    list.push(rel.from);
-    incoming.set(rel.to, list);
-  }
+  const defaultStyle = findLineStyle(diagram.annotations) ?? "ortho";
 
-  const defaultStyle = findLineStyle(diagram.annotations) ?? "straight";
+  // lines of the same kind share a hub so they merge into one junction;
+  // a different kind landing on an occupied hub is nudged a few pixels
+  // along the edge so e.g. a dependency never sits on top of an arrow
+  const hubKinds = new Map<string, RelationshipKind[]>();
+  const typedHub = (h: Hub, kind: RelationshipKind): Hub => {
+    const key = `${h.x},${h.y},${h.axis}`;
+    const kinds = hubKinds.get(key) ?? [];
+    let i = kinds.indexOf(kind);
+    if (i === -1) {
+      i = kinds.length;
+      kinds.push(kind);
+      hubKinds.set(key, kinds);
+    }
+    const off = i * HUB_TYPE_GAP;
+    return h.axis === "v" ? { ...h, x: h.x + off } : { ...h, y: h.y + off };
+  };
 
   let out = "";
   for (const rel of valid) {
     const from = byName.get(rel.from)!;
     const to = byName.get(rel.to)!;
 
-    const arrivals = incoming.get(rel.to)!;
-    const idx = Math.max(arrivals.indexOf(rel.from), 0);
-    const route = routeFor(rel, from, to, idx, arrivals.length, defaultStyle);
+    let start: Hub;
+    let end: Hub;
+    if (isHierarchical(rel.kind)) {
+      [start, end] = hierarchyHubs(from, to);
+    } else {
+      start = sourceHub(from, rel, to);
+      end = targetHub(to, from);
+    }
+    start = typedHub(start, rel.kind);
+    end = typedHub(end, rel.kind);
+
+    const route = routeFor(rel, start, end, defaultStyle, byName);
     const points = route.map(([x, y]) => `${x},${y}`).join(" ");
+    const dash = isDashed(rel.kind) ? ` stroke-dasharray="6,4"` : "";
 
-    const dash =
-      rel.kind === RelationshipKind.Realization
-        ? ` stroke-dasharray="6,4"`
-        : "";
+    out += `<polyline points="${points}" fill="none" stroke="${ARROW_COLOR}" stroke-width="1.5"${dash} marker-end="url(#${markerFor(rel.kind)})"/>`;
 
-    out += `<polyline points="${points}" fill="none" stroke="${ARROW_COLOR}" stroke-width="1.5"${dash} marker-end="url(#inherit)"/>`;
+    if (rel.label !== undefined) {
+      const [lx, ly] = routeMidpoint(route);
+      out += `<text x="${lx}" y="${ly - 5}" text-anchor="middle" font-family="${SANS}" font-size="${LABEL_SIZE}" fill="${STEREOTYPE_COLOR}">${escapeXml(rel.label)}</text>`;
+    }
   }
   return out;
+}
+
+function isHierarchical(k: RelationshipKind): boolean {
+  return (
+    k === RelationshipKind.Inheritance || k === RelationshipKind.Realization
+  );
+}
+
+function isDashed(k: RelationshipKind): boolean {
+  return (
+    k === RelationshipKind.Realization || k === RelationshipKind.Dependency
+  );
+}
+
+// the marker lands on the "to" end, matching where the symbol sits in the
+// source text: A --o B draws the diamond touching B, so B is the whole
+function markerFor(k: RelationshipKind): string {
+  switch (k) {
+    case RelationshipKind.Inheritance:
+    case RelationshipKind.Realization:
+      return "inherit";
+    case RelationshipKind.Aggregation:
+      return "diamond";
+    case RelationshipKind.Composition:
+      return "diamond-filled";
+    default:
+      return "arrow";
+  }
+}
+
+// non-hierarchy lines leave from the row of the member that carries them:
+// an explicit qualifier (User.posts --> Post) wins, otherwise the first
+// member whose type mentions the target, otherwise the header band
+function sourceHub(from: Placed, rel: Relationship, to: Placed): Hub {
+  const right = cardCenter(to)[0] >= cardCenter(from)[0];
+  const member = rel.fromMember !== undefined
+    ? from.block.members.find((m) => m.name === rel.fromMember)
+    : from.block.members.find((m) => memberMentions(m, to.block.name));
+  const y = (member !== undefined ? memberRowY(from, member) : undefined) ??
+    from.y + from.headerH / 2;
+  return { x: right ? from.x + from.w : from.x, y, axis: "h" };
+}
+
+// side hub at header height, on the side facing the other block
+function headerHub(p: Placed, toward: Placed): Hub {
+  const right = cardCenter(toward)[0] >= cardCenter(p)[0];
+  return { x: right ? p.x + p.w : p.x, y: p.y + p.headerH / 2, axis: "h" };
+}
+
+// the arrival side mirrors sourceHub: if the target has a member whose
+// type mentions the source (the diamond end of a composition landing on
+// its items: List<OrderItem> row, say), the line lands on that row,
+// otherwise on the header band
+function targetHub(to: Placed, from: Placed): Hub {
+  const member = to.block.members.find((m) =>
+    memberMentions(m, from.block.name)
+  );
+  if (member === undefined) return headerHub(to, from);
+  const y = memberRowY(to, member);
+  if (y === undefined) return headerHub(to, from);
+  const right = cardCenter(from)[0] >= cardCenter(to)[0];
+  return { x: right ? to.x + to.w : to.x, y, axis: "h" };
+}
+
+// each block has one hub per hierarchy direction: all inheritance lines
+// leave through the top center and arrive at the bottom center (mirrored
+// when the parent sits lower), so sibling lines merge into one junction.
+// side-by-side blocks fall back to the header hubs so the line never has
+// to pass through either card
+function hierarchyHubs(from: Placed, to: Placed): [Hub, Hub] {
+  const sx = from.x + from.w / 2;
+  const ex = to.x + to.w / 2;
+  if (to.y + totalH(to) <= from.y) {
+    return [
+      { x: sx, y: from.y, axis: "v" },
+      { x: ex, y: to.y + totalH(to), axis: "v" },
+    ];
+  }
+  if (to.y >= from.y + totalH(from)) {
+    return [
+      { x: sx, y: from.y + totalH(from), axis: "v" },
+      { x: ex, y: to.y, axis: "v" },
+    ];
+  }
+  return [headerHub(from, to), headerHub(to, from)];
+}
+
+function memberMentions(m: Member, name: string): boolean {
+  if (typeMentions(m.returnType, name)) return true;
+  return m.params?.some((p) => typeMentions(p.typeRef, name)) ?? false;
+}
+
+function typeMentions(t: TypeRef | undefined, name: string): boolean {
+  if (t === undefined) return false;
+  return t.name === name || typeMentions(t.generic, name);
+}
+
+// center y of a member's row, mirroring the cursor walk in cardSvg
+function memberRowY(p: Placed, member: Member): number | undefined {
+  let cursorY = p.y + p.headerH;
+  for (const members of p.sections) {
+    if (members.length === 0) continue;
+    cursorY += SECTION_PAD;
+    for (const m of members) {
+      if (m === member) return cursorY + ROW_HEIGHT / 2;
+      cursorY += ROW_HEIGHT;
+    }
+    cursorY += SECTION_PAD;
+  }
+  return undefined;
 }
 
 // route precedence: user corners from @via win, then the relationship's own
 // @line style, then the diagram-level @line default
 function routeFor(
   rel: Relationship,
-  from: Placed,
-  to: Placed,
-  index: number,
-  total: number,
+  start: Hub,
+  end: Hub,
   defaultStyle: LineStyle,
+  byName: Map<string, Placed>,
 ): Route {
-  const via = findPoints(rel.annotations, "via");
+  const via = findPoints(rel.annotations, "via", byName);
   if (via.length > 0) {
-    const [fx, fy] = via[0];
-    const [lx, ly] = via[via.length - 1];
-    // endpoints stay glued to the card borders: the user owns the corners,
-    // the renderer owns where the line meets each block
-    const start = edgeIntersection(from, fx, fy);
-    const end = arrivalPoint(to, lx, ly, index, total);
-    return dedupe([start, ...via, end]);
+    return dedupe([[start.x, start.y], ...via, [end.x, end.y]]);
   }
   const style = findLineStyle(rel.annotations) ?? defaultStyle;
-  return style === "ortho"
-    ? routeOrtho(from, to, index, total)
-    : routeStraight(from, to, index, total);
+  if (style === "straight") {
+    return [
+      [start.x, start.y],
+      [end.x, end.y],
+    ];
+  }
+  return routeOrtho(start, end);
 }
 
-function routeStraight(
-  from: Placed,
-  to: Placed,
-  index: number,
-  total: number,
-): Route {
-  const [fx, fy] = cardCenter(from);
-  const end = arrivalPoint(to, fx, fy, index, total);
-  const start = edgeIntersection(from, end[0], end[1]);
-  return [start, end];
-}
-
-// axis-aligned elbow between the facing edges: vertical-horizontal-vertical
-// when the blocks are stacked, horizontal-vertical-horizontal side by side
-function routeOrtho(
-  from: Placed,
-  to: Placed,
-  index: number,
-  total: number,
-): Route {
-  const frac = (index + 1) / (total + 1);
-  const [cx, cy] = cardCenter(to);
-  const [fx, fy] = cardCenter(from);
-  const dx = fx - cx;
-  const dy = fy - cy;
-  if (Math.abs(dx) > Math.abs(dy)) {
-    const x1 = dx > 0 ? from.x : from.x + from.w;
-    const x2 = dx > 0 ? to.x + to.w : to.x;
-    const y2 = to.y + totalH(to) * frac;
-    const midX = (x1 + x2) / 2;
+// axis-aligned elbow between two hubs, shaped by their leave directions:
+// two vertical hubs make a vertical-horizontal-vertical elbow, two
+// horizontal ones the transpose, mixed axes a single corner
+function routeOrtho(s: Hub, e: Hub): Route {
+  if (s.axis === "v" && e.axis === "v") {
+    const midY = (s.y + e.y) / 2;
     return dedupe([
-      [x1, fy],
-      [midX, fy],
-      [midX, y2],
-      [x2, y2],
+      [s.x, s.y],
+      [s.x, midY],
+      [e.x, midY],
+      [e.x, e.y],
     ]);
   }
-  const y1 = dy > 0 ? from.y : from.y + totalH(from);
-  const y2 = dy > 0 ? to.y + totalH(to) : to.y;
-  const x2 = to.x + to.w * frac;
-  const midY = (y1 + y2) / 2;
-  return dedupe([
-    [fx, y1],
-    [fx, midY],
-    [x2, midY],
-    [x2, y2],
-  ]);
+  if (s.axis === "h" && e.axis === "h") {
+    const midX = (s.x + e.x) / 2;
+    return dedupe([
+      [s.x, s.y],
+      [midX, s.y],
+      [midX, e.y],
+      [e.x, e.y],
+    ]);
+  }
+  const corner: [number, number] = s.axis === "v" ? [s.x, e.y] : [e.x, s.y];
+  return dedupe([[s.x, s.y], corner, [e.x, e.y]]);
+}
+
+function routeMidpoint(route: Route): [number, number] {
+  const i = Math.floor((route.length - 1) / 2);
+  const [x1, y1] = route[i];
+  const [x2, y2] = route[Math.min(i + 1, route.length - 1)];
+  return [(x1 + x2) / 2, (y1 + y2) / 2];
 }
 
 function dedupe(route: Route): Route {
@@ -217,56 +378,19 @@ function dedupe(route: Route): Route {
   return out;
 }
 
-// incoming edges land on whichever edge of the target faces the given
-// point, spread along that edge so multiple arrivals never converge
-function arrivalPoint(
-  p: Placed,
-  towardX: number,
-  towardY: number,
-  index: number,
-  total: number,
-): [number, number] {
-  const frac = (index + 1) / (total + 1);
-  const [cx, cy] = cardCenter(p);
-  const dx = towardX - cx;
-  const dy = towardY - cy;
-  const h = totalH(p);
-  if (Math.abs(dx) > Math.abs(dy)) {
-    return [dx > 0 ? p.x + p.w : p.x, p.y + h * frac];
-  }
-  return [p.x + p.w * frac, dy > 0 ? p.y + h : p.y];
-}
-
 function cardCenter(p: Placed): [number, number] {
   return [p.x + p.w / 2, p.y + totalH(p) / 2];
-}
-
-// point on the card border where the line from the card center towards the target leaves the card
-function edgeIntersection(
-  p: Placed,
-  targetX: number,
-  targetY: number,
-): [number, number] {
-  const [cx, cy] = cardCenter(p);
-  const dx = targetX - cx;
-  const dy = targetY - cy;
-  if (Math.abs(dx) < Number.EPSILON && Math.abs(dy) < Number.EPSILON) {
-    return [cx, cy];
-  }
-  const halfW = p.w / 2;
-  const halfH = totalH(p) / 2;
-  const tX = Math.abs(dx) < Number.EPSILON ? Infinity : halfW / Math.abs(dx);
-  const tY = Math.abs(dy) < Number.EPSILON ? Infinity : halfH / Math.abs(dy);
-  const t = Math.min(tX, tY);
-  return [cx + dx * t, cy + dy * t];
 }
 
 function layout(diagram: Diagram): Placed[] {
   const order = depthSortedBlocks(diagram);
   const out: Placed[] = [];
+  // filled as blocks are placed, so a block's geometry expressions can
+  // reference any block laid out before it (forward refs fall back)
+  const placedSoFar = new Map<string, Placed>();
   let autoY = MARGIN;
   for (const b of order) {
-    const w = findNumber(b.annotations, "size") ?? autoWidth(b);
+    const w = findNumber(b.annotations, "size", placedSoFar) ?? autoWidth(b);
     const sections = groupByKind(b.members);
     const headerH =
       HEADER_PAD_TOP + STEREOTYPE_SIZE + 8 + NAME_SIZE + HEADER_PAD_BOTTOM;
@@ -274,7 +398,7 @@ function layout(diagram: Diagram): Placed[] {
       ms.length === 0 ? 0 : SECTION_PAD * 2 + ms.length * ROW_HEIGHT,
     );
 
-    const [x, y] = findPos(b.annotations) ?? [MARGIN, autoY];
+    const [x, y] = findPos(b.annotations, placedSoFar) ?? [MARGIN, autoY];
     const placed: Placed = {
       block: b,
       x,
@@ -289,18 +413,157 @@ function layout(diagram: Diagram): Placed[] {
     };
     autoY = y + totalH(placed) + GAP;
     out.push(placed);
+    placedSoFar.set(b.name, placed);
   }
   return out;
 }
 
-function viewport(placed: Placed[]): [number, number] {
+function viewport(
+  placed: Placed[],
+  notes: PlacedNote[],
+  regions: PlacedRegion[],
+): [number, number] {
   let maxX = MARGIN;
   let maxY = MARGIN;
-  for (const p of placed) {
-    maxX = Math.max(maxX, p.x + p.w);
-    maxY = Math.max(maxY, p.y + totalH(p));
-  }
+  const extend = (x: number, y: number) => {
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  };
+  for (const p of placed) extend(p.x + p.w, p.y + totalH(p));
+  for (const n of notes) extend(n.x + n.w, n.y + n.h);
+  for (const r of regions) extend(r.x + r.w, r.y + r.h);
   return [maxX + MARGIN, maxY + MARGIN];
+}
+
+interface PlacedNote {
+  note: Note;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  lines: string[];
+  target?: Placed;
+}
+
+// notes size themselves to their wrapped text. @pos wins; a targeted note
+// sits to the right of its target; the rest stack below the blocks
+function layoutNotes(
+  notes: Note[],
+  byName: Map<string, Placed>,
+  placed: Placed[],
+): PlacedNote[] {
+  let autoY = MARGIN;
+  for (const p of placed) autoY = Math.max(autoY, p.y + totalH(p) + GAP);
+
+  const out: PlacedNote[] = [];
+  for (const note of notes) {
+    const lines = wrapText(note.text, NOTE_MAX_CHARS);
+    const maxLen = Math.max(...lines.map((l) => l.length));
+    const w = Math.ceil(maxLen * NOTE_SIZE * SANS_CHAR_RATIO) + NOTE_PAD * 2;
+    const h = lines.length * NOTE_LINE_H + NOTE_PAD * 2;
+    const target = note.target !== undefined
+      ? byName.get(note.target)
+      : undefined;
+
+    let pos = findPos(note.annotations, byName);
+    if (pos === undefined) {
+      if (target !== undefined) {
+        pos = [target.x + target.w + GAP, target.y];
+      } else {
+        pos = [MARGIN, autoY];
+        autoY += h + GAP;
+      }
+    }
+    out.push({ note, x: pos[0], y: pos[1], w, h, lines, target });
+  }
+  return out;
+}
+
+function wrapText(text: string, maxChars: number): string[] {
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line === "" ? word : `${line} ${word}`;
+    if (candidate.length > maxChars && line !== "") {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line !== "") lines.push(line);
+  return lines.length > 0 ? lines : [""];
+}
+
+function noteSvg(n: PlacedNote): string {
+  const fill = findColor(n.note.annotations, "bg") ?? NOTE_FILL;
+  let out = `<g data-note="">`;
+  out += `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="4" fill="${fill}" stroke="${NOTE_STROKE}" stroke-width="1"/>`;
+  for (let i = 0; i < n.lines.length; i++) {
+    const y = n.y + NOTE_PAD + i * NOTE_LINE_H + NOTE_LINE_H / 2;
+    // centered so estimate error in the box width splits evenly between
+    // the two sides instead of piling up on one
+    out += `<text x="${n.x + n.w / 2}" y="${y}" text-anchor="middle" font-family="${SANS}" font-size="${NOTE_SIZE}" fill="${NOTE_TEXT}" dominant-baseline="central">${escapeXml(n.lines[i])}</text>`;
+  }
+  out += `</g>`;
+  return out;
+}
+
+// dashed link from the note's facing side to the target's header band
+function noteConnectorSvg(n: PlacedNote): string {
+  const t = n.target!;
+  const noteRightOfTarget = n.x + n.w / 2 >= cardCenter(t)[0];
+  const x1 = noteRightOfTarget ? n.x : n.x + n.w;
+  const x2 = noteRightOfTarget ? t.x + t.w : t.x;
+  const y1 = n.y + n.h / 2;
+  const y2 = t.y + t.headerH / 2;
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${ARROW_COLOR}" stroke-width="1" stroke-dasharray="4,3"/>`;
+}
+
+interface PlacedRegion {
+  region: Region;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+// a region is an explicit rect from @pos(x, y, w, h), or the bounding box
+// of its member blocks plus padding. regions with neither are skipped
+function layoutRegions(
+  regions: Region[],
+  byName: Map<string, Placed>,
+): PlacedRegion[] {
+  const out: PlacedRegion[] = [];
+  for (const region of regions) {
+    const rect = findRect(region.annotations, byName);
+    if (rect !== undefined) {
+      out.push({ region, x: rect[0], y: rect[1], w: rect[2], h: rect[3] });
+      continue;
+    }
+    const members = region.members
+      .map((name) => byName.get(name))
+      .filter((p): p is Placed => p !== undefined);
+    if (members.length === 0) continue;
+    const minX = Math.min(...members.map((p) => p.x)) - REGION_PAD;
+    const minY = Math.min(...members.map((p) => p.y)) - REGION_PAD;
+    const maxX = Math.max(...members.map((p) => p.x + p.w)) + REGION_PAD;
+    const maxY = Math.max(...members.map((p) => p.y + totalH(p))) + REGION_PAD;
+    out.push({ region, x: minX, y: minY, w: maxX - minX, h: maxY - minY });
+  }
+  return out;
+}
+
+function regionSvg(r: PlacedRegion): string {
+  const fill = findColor(r.region.annotations, "bg") ?? "none";
+  const stroke = findColor(r.region.annotations, "edge") ?? DEFAULT_STROKE;
+  let out = `<g data-region="${escapeXml(r.region.name)}">`;
+  out += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="8" fill="${fill}" stroke="${stroke}" stroke-width="1"/>`;
+  // label sits above the rect so member cards can never paint over it
+  out += `<text x="${r.x + 4}" y="${r.y - 6}" font-family="${SANS}" font-size="${REGION_LABEL_SIZE}" font-style="italic" fill="${STEREOTYPE_COLOR}">${escapeXml(r.region.name)}</text>`;
+  out += `</g>`;
+  return out;
 }
 
 function cardSvg(p: Placed): string {
@@ -441,45 +704,137 @@ function findAnnotation(
   return anns.find((a) => a.name === name);
 }
 
-function findPos(anns: Annotation[]): [number, number] | undefined {
+function findPos(
+  anns: Annotation[],
+  env: Map<string, Placed>,
+): [number, number] | undefined {
   const a = findAnnotation(anns, "pos");
   if (a === undefined) return undefined;
-  const x = argAsNumber(a.args[0]);
-  const y = argAsNumber(a.args[1]);
+  const x = argAsNumber(a.args[0], env);
+  const y = argAsNumber(a.args[1], env);
   if (x === undefined || y === undefined) return undefined;
   return [x, y];
 }
 
-function findNumber(anns: Annotation[], name: string): number | undefined {
+// rect from a four-number @pos(x, y, w, h), used by regions
+function findRect(
+  anns: Annotation[],
+  env: Map<string, Placed>,
+): [number, number, number, number] | undefined {
+  const a = findAnnotation(anns, "pos");
+  if (a === undefined) return undefined;
+  const nums = a.args.slice(0, 4).map((arg) => argAsNumber(arg, env));
+  if (nums.length < 4 || nums.some((n) => n === undefined)) return undefined;
+  return [nums[0]!, nums[1]!, nums[2]!, nums[3]!];
+}
+
+function findNumber(
+  anns: Annotation[],
+  name: string,
+  env: Map<string, Placed>,
+): number | undefined {
   const a = findAnnotation(anns, name);
   if (a === undefined) return undefined;
-  return argAsNumber(a.args[0]);
+  return argAsNumber(a.args[0], env);
 }
 
 function findColor(anns: Annotation[], name: string): string | undefined {
   const arg = findAnnotation(anns, name)?.args[0];
-  if (arg === undefined || arg.kind === "number" || arg.kind === "point") {
-    return undefined;
-  }
-  return arg.value;
-}
-
-function findLineStyle(anns: Annotation[]): LineStyle | undefined {
-  const arg = findAnnotation(anns, "line")?.args[0];
-  if (arg?.kind === "ident" && (arg.value === "straight" || arg.value === "ortho")) {
+  if (arg?.kind === "hex" || arg?.kind === "ident" || arg?.kind === "str") {
     return arg.value;
   }
   return undefined;
 }
 
-function findPoints(anns: Annotation[], name: string): [number, number][] {
-  const a = findAnnotation(anns, name);
-  if (a === undefined) return [];
-  return a.args.filter((arg) => arg.kind === "point").map((arg) => arg.value);
+function findLineStyle(anns: Annotation[]): LineStyle | undefined {
+  const arg = findAnnotation(anns, "line")?.args[0];
+  if (
+    arg?.kind === "ident" &&
+    (arg.value === "straight" || arg.value === "ortho")
+  ) {
+    return arg.value;
+  }
+  return undefined;
 }
 
-function argAsNumber(arg: AnnotationArg | undefined): number | undefined {
-  return arg?.kind === "number" ? arg.value : undefined;
+// resolved point args; if any coordinate fails to evaluate the whole
+// annotation is treated as absent so routing falls back to automatic
+function findPoints(
+  anns: Annotation[],
+  name: string,
+  env: Map<string, Placed>,
+): [number, number][] {
+  const a = findAnnotation(anns, name);
+  if (a === undefined) return [];
+  const out: [number, number][] = [];
+  for (const arg of a.args) {
+    if (arg.kind !== "point") continue;
+    const x = evalNumExpr(arg.value[0], env);
+    const y = evalNumExpr(arg.value[1], env);
+    if (x === undefined || y === undefined) return [];
+    out.push([x, y]);
+  }
+  return out;
+}
+
+function argAsNumber(
+  arg: AnnotationArg | undefined,
+  env: Map<string, Placed>,
+): number | undefined {
+  if (arg?.kind === "number") return arg.value;
+  if (arg?.kind === "expr") return evalNumExpr(arg.value, env);
+  return undefined;
+}
+
+// geometry refs resolve against laid-out blocks; unknown blocks or
+// functions make the whole expression undefined so callers fall back
+function evalNumExpr(
+  e: NumExpr,
+  env: Map<string, Placed>,
+): number | undefined {
+  switch (e.op) {
+    case "num":
+      return e.value;
+    case "ref": {
+      const p = env.get(e.block);
+      if (p === undefined) return undefined;
+      switch (e.fn) {
+        case "x":
+          return p.x;
+        case "y":
+          return p.y;
+        case "width":
+          return p.w;
+        case "height":
+          return totalH(p);
+        case "right":
+          return p.x + p.w;
+        case "bottom":
+          return p.y + totalH(p);
+        case "cx":
+          return p.x + p.w / 2;
+        case "cy":
+          return p.y + totalH(p) / 2;
+        default:
+          return undefined;
+      }
+    }
+    default: {
+      const l = evalNumExpr(e.left, env);
+      const r = evalNumExpr(e.right, env);
+      if (l === undefined || r === undefined) return undefined;
+      switch (e.op) {
+        case "+":
+          return l + r;
+        case "-":
+          return l - r;
+        case "*":
+          return l * r;
+        case "/":
+          return l / r;
+      }
+    }
+  }
 }
 
 function escapeXml(s: string): string {

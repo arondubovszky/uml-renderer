@@ -180,18 +180,83 @@ Deno.test(function keywordsAreFineOutsideItemPosition() {
   assertEquals(members[1].params?.[0].name, "region");
 });
 
+Deno.test(function parsesMemberQualifiedSource() {
+  const d = parse(`User.posts --> Post : "writes"`);
+  const r = d.relationships[0];
+  assertEquals(r.from, "User");
+  assertEquals(r.fromMember, "posts");
+  assertEquals(r.to, "Post");
+  assertEquals(r.label, "writes");
+});
+
+Deno.test(function qualifiedSourceRequiresRelOp() {
+  assertThrows(
+    () => parse("User.posts { }"),
+    ParseError,
+    'expected relationship operator after "User.posts"',
+  );
+});
+
+Deno.test(function targetSideQualifierIsRejected() {
+  assertThrows(
+    () => parse("User.posts --> Post.id"),
+    ParseError,
+    "member qualifiers are only allowed on the source side",
+  );
+});
+
+const num = (value: number) => ({ op: "num", value }) as const;
+
 Deno.test(function parsesPointAnnotationArgs() {
   const d = parse("A --|> B @via((50,40), (67,0)) @line(ortho)");
   const anns = d.relationships[0].annotations;
   assertEquals(anns[0].args, [
-    { kind: "point", value: [50, 40] },
-    { kind: "point", value: [67, 0] },
+    { kind: "point", value: [num(50), num(40)] },
+    { kind: "point", value: [num(67), num(0)] },
   ]);
   assertEquals(anns[1].args, [{ kind: "ident", value: "ortho" }]);
 });
 
-Deno.test(function pointArgsRejectMissingCoordinate() {
-  assertThrows(() => parse("A --|> B @via((50))"), ParseError, 'expected ","');
+Deno.test(function parsesGeometryExprsInPoints() {
+  const d = parse("A --> B @via((width(User)+20, y(User)))");
+  assertEquals(d.relationships[0].annotations[0].args[0], {
+    kind: "point",
+    value: [
+      {
+        op: "+",
+        left: { op: "ref", fn: "width", block: "User" },
+        right: num(20),
+      },
+      { op: "ref", fn: "y", block: "User" },
+    ],
+  });
+});
+
+Deno.test(function exprsRespectPrecedenceAndParens() {
+  const d = parse("class X @gap(2+3*4, (2+3)*4) { }");
+  const [a, b] = d.blocks[0].annotations[0].args;
+  assertEquals(a, {
+    kind: "expr",
+    value: { op: "+", left: num(2), right: { op: "*", left: num(3), right: num(4) } },
+  });
+  assertEquals(b, {
+    kind: "expr",
+    value: { op: "*", left: { op: "+", left: num(2), right: num(3) }, right: num(4) },
+  });
+});
+
+Deno.test(function bareIdentsAndNumbersStayPlainArgs() {
+  const d = parse("class X @color(red) @size(240) { }");
+  assertEquals(d.blocks[0].annotations[0].args[0], { kind: "ident", value: "red" });
+  assertEquals(d.blocks[0].annotations[1].args[0], { kind: "number", value: 240 });
+});
+
+Deno.test(function parenthesizedSingleExprIsScalarNotPoint() {
+  const d = parse("A --|> B @via((50))");
+  assertEquals(d.relationships[0].annotations[0].args[0], {
+    kind: "number",
+    value: 50,
+  });
 });
 
 Deno.test(function errorsCarryLineAndColumn() {
