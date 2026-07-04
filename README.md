@@ -2,7 +2,7 @@
 
 ![example diagram](example.svg)
 
-```
+```ts
 @bg(#fafafa)
 
 interface Entity @pos(400, 40) @bg(#f3f4f6) {

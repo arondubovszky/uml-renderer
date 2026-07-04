@@ -1,1 +1,4 @@
 .zed/
+output/
+*.svg
+!readme.svg
