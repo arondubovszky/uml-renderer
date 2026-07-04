@@ -59,7 +59,7 @@ Admin --|> User
 Category --|> Entity
 Product --|> Entity
 
-Product --o Category
+Product --* Category
 OrderItem --* Order : "contains"
 OrderItem.product --> Product @via((right(OrderItem)+24, cy(OrderItem)), (right(Product)+24, cy(Product))) @line(ortho)
 User.orders --> Order : "places"
