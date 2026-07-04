@@ -1,6 +1,6 @@
 ## Example
 
-![example diagram](example.svg)
+![example diagram](readme.svg)
 
 ```ts
 @bg(#fafafa)
