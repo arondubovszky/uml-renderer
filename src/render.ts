@@ -14,7 +14,15 @@ import {
   Visibility,
 } from "./ir.ts";
 
-import config_file from "../config.json" with { type: "json" };
+import defaultConfig from "../config.json" with { type: "json" };
+
+export type Config = typeof defaultConfig;
+
+let config_file: Config = defaultConfig;
+
+export function setConfig(overrides: Partial<Config>): void {
+  config_file = { ...defaultConfig, ...overrides };
+}
 
 interface Placed {
   block: Block;
