@@ -1,0 +1,230 @@
+{
+  "classes": [
+    {
+      "id": "class-entity",
+      "x": 361,
+      "y": 50,
+      "width": 180,
+      "height": 100,
+      "backgroundColor": "#f3f4f6",
+      "borderColor": "#333",
+      "borderWidth": 2,
+      "borderRadius": 5,
+      "className": "Entity",
+      "attributes": [
+        "+ id: UUID",
+        "+ createdAt: Time"
+      ]
+    },
+    {
+      "id": "class-user",
+      "x": 38,
+      "y": 33,
+      "width": 180,
+      "height": 100,
+      "backgroundColor": "#e0e7ff",
+      "borderColor": "#333",
+      "borderWidth": 2,
+      "borderRadius": 5,
+      "className": "User",
+      "attributes": [
+        "+ name: String",
+        "+ orders: List<Order>"
+      ]
+    },
+    {
+      "id": "class-admin",
+      "x": 40,
+      "y": 280,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#e0f2fe",
+      "borderColor": "#333",
+      "borderWidth": 2,
+      "borderRadius": 5,
+      "className": "Admin",
+      "attributes": [
+        "+ permissions: List<String>"
+      ]
+    },
+    {
+      "id": "class-category",
+      "x": 400,
+      "y": 280,
+      "width": 180,
+      "height": 100,
+      "backgroundColor": "#dcfce7",
+      "borderColor": "#333",
+      "borderWidth": 2,
+      "borderRadius": 5,
+      "className": "Category",
+      "attributes": [
+        "+ title: String",
+        "+ products: List<Product>"
+      ]
+    },
+    {
+      "id": "class-product",
+      "x": 760,
+      "y": 280,
+      "width": 180,
+      "height": 120,
+      "backgroundColor": "#dcfce7",
+      "borderColor": "#333",
+      "borderWidth": 2,
+      "borderRadius": 5,
+      "className": "Product",
+      "attributes": [
+        "+ title: String",
+        "+ price: Money",
+        "- stock: Int"
+      ]
+    },
+    {
+      "id": "class-order",
+      "x": 400,
+      "y": 560,
+      "width": 180,
+      "height": 120,
+      "backgroundColor": "#fce7f3",
+      "borderColor": "#333",
+      "borderWidth": 2,
+      "borderRadius": 5,
+      "className": "Order",
+      "attributes": [
+        "+ items: List<OrderItem>",
+        "+ total: Money",
+        "+ status: Status"
+      ]
+    },
+    {
+      "id": "class-orderitem",
+      "x": 760,
+      "y": 560,
+      "width": 180,
+      "height": 100,
+      "backgroundColor": "#fce7f3",
+      "borderColor": "#333",
+      "borderWidth": 2,
+      "borderRadius": 5,
+      "className": "OrderItem",
+      "attributes": [
+        "+ product: Product",
+        "+ qty: Int"
+      ]
+    },
+    {
+      "id": "class-payment",
+      "x": 40,
+      "y": 560,
+      "width": 240,
+      "height": 100,
+      "backgroundColor": "#fef9c3",
+      "borderColor": "#333",
+      "borderWidth": 2,
+      "borderRadius": 5,
+      "className": "Payment",
+      "attributes": [
+        "+ amount: Money",
+        "+ charge(order: Order): Bool"
+      ]
+    }
+  ],
+  "arrows": [
+    {
+      "id": "arrow-1",
+      "fromClassId": "class-admin",
+      "fromPosition": 0,
+      "toClassId": "class-user",
+      "toPosition": 0.5,
+      "waypoints": [],
+      "label": "Extends"
+    },
+    {
+      "id": "arrow-2",
+      "fromClassId": "class-category",
+      "fromPosition": 0,
+      "toClassId": "class-entity",
+      "toPosition": 0.4762845039367676,
+      "waypoints": [],
+      "label": "Extends"
+    },
+    {
+      "id": "arrow-3",
+      "fromClassId": "class-product",
+      "fromPosition": 0,
+      "toClassId": "class-entity",
+      "toPosition": 0.34119749069213867,
+      "waypoints": [
+        {
+          "x": 831,
+          "y": 219
+        }
+      ],
+      "label": "Extends"
+    },
+    {
+      "id": "arrow-4",
+      "fromClassId": "class-product",
+      "fromPosition": 0.75,
+      "toClassId": "class-category",
+      "toPosition": 0.25,
+      "waypoints": [],
+      "label": ""
+    },
+    {
+      "id": "arrow-5",
+      "fromClassId": "class-orderitem",
+      "fromPosition": 0.75,
+      "toClassId": "class-order",
+      "toPosition": 0.25,
+      "waypoints": [],
+      "label": "contains"
+    },
+    {
+      "id": "arrow-6",
+      "fromClassId": "class-orderitem",
+      "fromPosition": 0,
+      "toClassId": "class-product",
+      "toPosition": 0.5,
+      "waypoints": [],
+      "label": ""
+    },
+    {
+      "id": "arrow-7",
+      "fromClassId": "class-user",
+      "fromPosition": 0.335176944732666,
+      "toClassId": "class-order",
+      "toPosition": 0.75,
+      "waypoints": [
+        {
+          "x": 315,
+          "y": 187
+        },
+        {
+          "x": 318,
+          "y": 377
+        }
+      ],
+      "label": "places"
+    },
+    {
+      "id": "arrow-8",
+      "fromClassId": "class-payment",
+      "fromPosition": 0.25,
+      "toClassId": "class-order",
+      "toPosition": 0.75,
+      "waypoints": [],
+      "label": ""
+    },
+    {
+      "id": "arrow-9",
+      "fromClassId": "class-admin",
+      "fromPosition": 0.25,
+      "toClassId": "class-category",
+      "toPosition": 0.75,
+      "waypoints": [],
+      "label": "curates"
+    }
+  ]
+}
