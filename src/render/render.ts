@@ -12,7 +12,7 @@ import {
   RelationshipKind,
   TypeRef,
   Visibility,
-} from "./ir.ts";
+} from "../ir.ts";
 
 const DEFAULT_W = 280;
 const MARGIN = 40;
