@@ -14,49 +14,7 @@ import {
   Visibility,
 } from "./ir.ts";
 
-const DEFAULT_W = 280;
-const MARGIN = 40;
-const GAP = 24;
-const CORNER = 10;
-
-// << >>
-const STEREOTYPE_SIZE = 14;
-const NAME_SIZE = 18;
-const MEMBER_SIZE = 13;
-const MONO_CHAR_RATIO = 0.62;
-// average glyph width of the sans stack, used to size note boxes
-const SANS_CHAR_RATIO = 0.55;
-
-const HEADER_PAD_TOP = 16;
-const HEADER_PAD_BOTTOM = 16;
-const SECTION_PAD = 12;
-const ROW_HEIGHT = 26;
-const MEMBER_PAD_X = 16;
-
-const MONO = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-const SANS =
-  "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-
-const DEFAULT_FILL = "#111214";
-const DEFAULT_STROKE = "#3f4046";
-const DEFAULT_TEXT = "#000";
-const STEREOTYPE_COLOR = "#8a8d95";
-const ARROW_COLOR = "#6a6d75";
-const LABEL_SIZE = 11;
-
-const NOTE_FILL = "#fff8c5";
-const NOTE_STROKE = "#d4b106";
-const NOTE_TEXT = "#57534e";
-const NOTE_SIZE = 12;
-const NOTE_LINE_H = 18;
-const NOTE_PAD = 10;
-const NOTE_MAX_CHARS = 32;
-
-const REGION_PAD = 16;
-const REGION_LABEL_SIZE = 12;
-
-// spacing between hubs of different relationship kinds at the same spot
-const HUB_TYPE_GAP = 8;
+import config_file from "../config.json" with { type: "json" };
 
 interface Placed {
   block: Block;
@@ -115,16 +73,16 @@ function defs(hollowFill: string): string {
   return (
     `<defs>` +
     `<marker id="inherit" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">` +
-    `<path d="M 0 0 L 10 5 L 0 10 z" fill="${hollowFill}" stroke="${ARROW_COLOR}" stroke-width="1"/>` +
+    `<path d="M 0 0 L 10 5 L 0 10 z" fill="${hollowFill}" stroke="${config_file.arrow_color}" stroke-width="1"/>` +
     `</marker>` +
     `<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">` +
-    `<path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="${ARROW_COLOR}" stroke-width="1.5"/>` +
+    `<path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="${config_file.arrow_color}" stroke-width="1.5"/>` +
     `</marker>` +
     `<marker id="diamond" viewBox="0 0 14 8" refX="13" refY="4" markerWidth="14" markerHeight="8" orient="auto-start-reverse">` +
-    `<path d="M 1 4 L 7 1 L 13 4 L 7 7 z" fill="${hollowFill}" stroke="${ARROW_COLOR}" stroke-width="1"/>` +
+    `<path d="M 1 4 L 7 1 L 13 4 L 7 7 z" fill="${hollowFill}" stroke="${config_file.arrow_color}" stroke-width="1"/>` +
     `</marker>` +
     `<marker id="diamond-filled" viewBox="0 0 14 8" refX="13" refY="4" markerWidth="14" markerHeight="8" orient="auto-start-reverse">` +
-    `<path d="M 1 4 L 7 1 L 13 4 L 7 7 z" fill="${ARROW_COLOR}" stroke="${ARROW_COLOR}" stroke-width="1"/>` +
+    `<path d="M 1 4 L 7 1 L 13 4 L 7 7 z" fill="${config_file.arrow_color}" stroke="${config_file.arrow_color}" stroke-width="1"/>` +
     `</marker>` +
     `</defs>`
   );
@@ -167,7 +125,7 @@ function relationshipsSvg(
       kinds.push(kind);
       hubKinds.set(key, kinds);
     }
-    const off = i * HUB_TYPE_GAP;
+    const off = i * config_file.hub_type_gap;
     return h.axis === "v" ? { ...h, x: h.x + off } : { ...h, y: h.y + off };
   };
 
@@ -191,11 +149,11 @@ function relationshipsSvg(
     const points = route.map(([x, y]) => `${x},${y}`).join(" ");
     const dash = isDashed(rel.kind) ? ` stroke-dasharray="6,4"` : "";
 
-    out += `<polyline points="${points}" fill="none" stroke="${ARROW_COLOR}" stroke-width="1.5"${dash} marker-end="url(#${markerFor(rel.kind)})"/>`;
+    out += `<polyline points="${points}" fill="none" stroke="${config_file.arrow_color}" stroke-width="1.5"${dash} marker-end="url(#${markerFor(rel.kind)})"/>`;
 
     if (rel.label !== undefined) {
       const [lx, ly] = routeMidpoint(route);
-      out += `<text x="${lx}" y="${ly - 5}" text-anchor="middle" font-family="${SANS}" font-size="${LABEL_SIZE}" fill="${STEREOTYPE_COLOR}">${escapeXml(rel.label)}</text>`;
+      out += `<text x="${lx}" y="${ly - 5}" text-anchor="middle" font-family="${config_file.sans_font_family}" font-size="${config_file.label_font_size}" fill="${config_file.stereotype_text_color}">${escapeXml(rel.label)}</text>`;
     }
   }
   return out;
@@ -234,10 +192,12 @@ function markerFor(k: RelationshipKind): string {
 // member whose type mentions the target, otherwise the header band
 function sourceHub(from: Placed, rel: Relationship, to: Placed): Hub {
   const right = cardCenter(to)[0] >= cardCenter(from)[0];
-  const member = rel.fromMember !== undefined
-    ? from.block.members.find((m) => m.name === rel.fromMember)
-    : from.block.members.find((m) => memberMentions(m, to.block.name));
-  const y = (member !== undefined ? memberRowY(from, member) : undefined) ??
+  const member =
+    rel.fromMember !== undefined
+      ? from.block.members.find((m) => m.name === rel.fromMember)
+      : from.block.members.find((m) => memberMentions(m, to.block.name));
+  const y =
+    (member !== undefined ? memberRowY(from, member) : undefined) ??
     from.y + from.headerH / 2;
   return { x: right ? from.x + from.w : from.x, y, axis: "h" };
 }
@@ -254,7 +214,7 @@ function headerHub(p: Placed, toward: Placed): Hub {
 // otherwise on the header band
 function targetHub(to: Placed, from: Placed): Hub {
   const member = to.block.members.find((m) =>
-    memberMentions(m, from.block.name)
+    memberMentions(m, from.block.name),
   );
   if (member === undefined) return headerHub(to, from);
   const y = memberRowY(to, member);
@@ -301,12 +261,12 @@ function memberRowY(p: Placed, member: Member): number | undefined {
   let cursorY = p.y + p.headerH;
   for (const members of p.sections) {
     if (members.length === 0) continue;
-    cursorY += SECTION_PAD;
+    cursorY += config_file.section_padding;
     for (const m of members) {
-      if (m === member) return cursorY + ROW_HEIGHT / 2;
-      cursorY += ROW_HEIGHT;
+      if (m === member) return cursorY + config_file.row_height / 2;
+      cursorY += config_file.row_height;
     }
-    cursorY += SECTION_PAD;
+    cursorY += config_file.section_padding;
   }
   return undefined;
 }
@@ -388,17 +348,26 @@ function layout(diagram: Diagram): Placed[] {
   // filled as blocks are placed, so a block's geometry expressions can
   // reference any block laid out before it (forward refs fall back)
   const placedSoFar = new Map<string, Placed>();
-  let autoY = MARGIN;
+  let autoY = config_file.margin;
   for (const b of order) {
     const w = findNumber(b.annotations, "size", placedSoFar) ?? autoWidth(b);
     const sections = groupByKind(b.members);
     const headerH =
-      HEADER_PAD_TOP + STEREOTYPE_SIZE + 8 + NAME_SIZE + HEADER_PAD_BOTTOM;
+      config_file.header_padding_top +
+      config_file.stereotype_font_size +
+      8 +
+      config_file.name_font_size +
+      config_file.header_padding_bottom;
     const sectionHeights = sections.map((ms) =>
-      ms.length === 0 ? 0 : SECTION_PAD * 2 + ms.length * ROW_HEIGHT,
+      ms.length === 0
+        ? 0
+        : config_file.section_padding * 2 + ms.length * config_file.row_height,
     );
 
-    const [x, y] = findPos(b.annotations, placedSoFar) ?? [MARGIN, autoY];
+    const [x, y] = findPos(b.annotations, placedSoFar) ?? [
+      config_file.margin,
+      autoY,
+    ];
     const placed: Placed = {
       block: b,
       x,
@@ -407,11 +376,13 @@ function layout(diagram: Diagram): Placed[] {
       sections,
       headerH,
       sectionHeights,
-      fill: findColor(b.annotations, "bg") ?? DEFAULT_FILL,
-      stroke: findColor(b.annotations, "edge") ?? DEFAULT_STROKE,
-      textColor: findColor(b.annotations, "color") ?? DEFAULT_TEXT,
+      fill: findColor(b.annotations, "bg") ?? config_file.default_fill_color,
+      stroke:
+        findColor(b.annotations, "edge") ?? config_file.default_stroke_color,
+      textColor:
+        findColor(b.annotations, "color") ?? config_file.default_text_color,
     };
-    autoY = y + totalH(placed) + GAP;
+    autoY = y + totalH(placed) + config_file.gap;
     out.push(placed);
     placedSoFar.set(b.name, placed);
   }
@@ -423,8 +394,8 @@ function viewport(
   notes: PlacedNote[],
   regions: PlacedRegion[],
 ): [number, number] {
-  let maxX = MARGIN;
-  let maxY = MARGIN;
+  let maxX = config_file.margin;
+  let maxY = config_file.margin;
   const extend = (x: number, y: number) => {
     maxX = Math.max(maxX, x);
     maxY = Math.max(maxY, y);
@@ -432,7 +403,7 @@ function viewport(
   for (const p of placed) extend(p.x + p.w, p.y + totalH(p));
   for (const n of notes) extend(n.x + n.w, n.y + n.h);
   for (const r of regions) extend(r.x + r.w, r.y + r.h);
-  return [maxX + MARGIN, maxY + MARGIN];
+  return [maxX + config_file.margin, maxY + config_file.margin];
 }
 
 interface PlacedNote {
@@ -452,26 +423,32 @@ function layoutNotes(
   byName: Map<string, Placed>,
   placed: Placed[],
 ): PlacedNote[] {
-  let autoY = MARGIN;
-  for (const p of placed) autoY = Math.max(autoY, p.y + totalH(p) + GAP);
+  let autoY = config_file.margin;
+  for (const p of placed)
+    autoY = Math.max(autoY, p.y + totalH(p) + config_file.gap);
 
   const out: PlacedNote[] = [];
   for (const note of notes) {
-    const lines = wrapText(note.text, NOTE_MAX_CHARS);
+    const lines = wrapText(note.text, config_file.note_max_chars);
     const maxLen = Math.max(...lines.map((l) => l.length));
-    const w = Math.ceil(maxLen * NOTE_SIZE * SANS_CHAR_RATIO) + NOTE_PAD * 2;
-    const h = lines.length * NOTE_LINE_H + NOTE_PAD * 2;
-    const target = note.target !== undefined
-      ? byName.get(note.target)
-      : undefined;
+    const w =
+      Math.ceil(
+        maxLen * config_file.note_font_size * config_file.sans_char_ratio,
+      ) +
+      config_file.note_padding * 2;
+    const h =
+      lines.length * config_file.note_line_height +
+      config_file.note_padding * 2;
+    const target =
+      note.target !== undefined ? byName.get(note.target) : undefined;
 
     let pos = findPos(note.annotations, byName);
     if (pos === undefined) {
       if (target !== undefined) {
-        pos = [target.x + target.w + GAP, target.y];
+        pos = [target.x + target.w + config_file.gap, target.y];
       } else {
-        pos = [MARGIN, autoY];
-        autoY += h + GAP;
+        pos = [config_file.margin, autoY];
+        autoY += h + config_file.gap;
       }
     }
     out.push({ note, x: pos[0], y: pos[1], w, h, lines, target });
@@ -497,14 +474,19 @@ function wrapText(text: string, maxChars: number): string[] {
 }
 
 function noteSvg(n: PlacedNote): string {
-  const fill = findColor(n.note.annotations, "bg") ?? NOTE_FILL;
+  const fill =
+    findColor(n.note.annotations, "bg") ?? config_file.note_fill_color;
   let out = `<g data-note="">`;
-  out += `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="4" fill="${fill}" stroke="${NOTE_STROKE}" stroke-width="1"/>`;
+  out += `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="4" fill="${fill}" stroke="${config_file.note_stroke_color}" stroke-width="1"/>`;
   for (let i = 0; i < n.lines.length; i++) {
-    const y = n.y + NOTE_PAD + i * NOTE_LINE_H + NOTE_LINE_H / 2;
+    const y =
+      n.y +
+      config_file.note_padding +
+      i * config_file.note_line_height +
+      config_file.note_line_height / 2;
     // centered so estimate error in the box width splits evenly between
     // the two sides instead of piling up on one
-    out += `<text x="${n.x + n.w / 2}" y="${y}" text-anchor="middle" font-family="${SANS}" font-size="${NOTE_SIZE}" fill="${NOTE_TEXT}" dominant-baseline="central">${escapeXml(n.lines[i])}</text>`;
+    out += `<text x="${n.x + n.w / 2}" y="${y}" text-anchor="middle" font-family="${config_file.sans_font_family}" font-size="${config_file.note_font_size}" fill="${config_file.note_text_color}" dominant-baseline="central">${escapeXml(n.lines[i])}</text>`;
   }
   out += `</g>`;
   return out;
@@ -518,7 +500,7 @@ function noteConnectorSvg(n: PlacedNote): string {
   const x2 = noteRightOfTarget ? t.x + t.w : t.x;
   const y1 = n.y + n.h / 2;
   const y2 = t.y + t.headerH / 2;
-  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${ARROW_COLOR}" stroke-width="1" stroke-dasharray="4,3"/>`;
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${config_file.arrow_color}" stroke-width="1" stroke-dasharray="4,3"/>`;
 }
 
 interface PlacedRegion {
@@ -546,10 +528,15 @@ function layoutRegions(
       .map((name) => byName.get(name))
       .filter((p): p is Placed => p !== undefined);
     if (members.length === 0) continue;
-    const minX = Math.min(...members.map((p) => p.x)) - REGION_PAD;
-    const minY = Math.min(...members.map((p) => p.y)) - REGION_PAD;
-    const maxX = Math.max(...members.map((p) => p.x + p.w)) + REGION_PAD;
-    const maxY = Math.max(...members.map((p) => p.y + totalH(p))) + REGION_PAD;
+    const minX =
+      Math.min(...members.map((p) => p.x)) - config_file.region_padding;
+    const minY =
+      Math.min(...members.map((p) => p.y)) - config_file.region_padding;
+    const maxX =
+      Math.max(...members.map((p) => p.x + p.w)) + config_file.region_padding;
+    const maxY =
+      Math.max(...members.map((p) => p.y + totalH(p))) +
+      config_file.region_padding;
     out.push({ region, x: minX, y: minY, w: maxX - minX, h: maxY - minY });
   }
   return out;
@@ -557,11 +544,12 @@ function layoutRegions(
 
 function regionSvg(r: PlacedRegion): string {
   const fill = findColor(r.region.annotations, "bg") ?? "none";
-  const stroke = findColor(r.region.annotations, "edge") ?? DEFAULT_STROKE;
+  const stroke =
+    findColor(r.region.annotations, "edge") ?? config_file.default_stroke_color;
   let out = `<g data-region="${escapeXml(r.region.name)}">`;
   out += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="8" fill="${fill}" stroke="${stroke}" stroke-width="1"/>`;
   // label sits above the rect so member cards can never paint over it
-  out += `<text x="${r.x + 4}" y="${r.y - 6}" font-family="${SANS}" font-size="${REGION_LABEL_SIZE}" font-style="italic" fill="${STEREOTYPE_COLOR}">${escapeXml(r.region.name)}</text>`;
+  out += `<text x="${r.x + 4}" y="${r.y - 6}" font-family="${config_file.sans_font_family}" font-size="${config_file.region_label_font_size}" font-style="italic" fill="${config_file.stereotype_text_color}">${escapeXml(r.region.name)}</text>`;
   out += `</g>`;
   return out;
 }
@@ -570,25 +558,31 @@ function cardSvg(p: Placed): string {
   const h = totalH(p);
   let out = `<g data-block="${escapeXml(p.block.name)}">`;
 
-  out += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${h}" rx="${CORNER}" ry="${CORNER}" fill="${p.fill}" stroke="${p.stroke}" stroke-width="1.5"/>`;
+  out += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${h}" rx="${config_file.corner_radius}" ry="${config_file.corner_radius}" fill="${p.fill}" stroke="${p.stroke}" stroke-width="1.5"/>`;
 
   const cx = p.x + p.w / 2;
-  const stereotypeY = p.y + HEADER_PAD_TOP + STEREOTYPE_SIZE;
-  out += `<text x="${cx}" y="${stereotypeY}" text-anchor="middle" font-family="${SANS}" font-size="${STEREOTYPE_SIZE}" font-style="italic" fill="${STEREOTYPE_COLOR}">«${escapeXml(p.block.kind)}»</text>`;
-  const nameY = stereotypeY + 8 + NAME_SIZE;
-  out += `<text x="${cx}" y="${nameY}" text-anchor="middle" font-family="${MONO}" font-size="${NAME_SIZE}" font-weight="700" fill="${p.textColor}">${escapeXml(p.block.name)}</text>`;
+  const stereotypeY =
+    p.y + config_file.header_padding_top + config_file.stereotype_font_size;
+  out += `<text x="${cx}" y="${stereotypeY}" text-anchor="middle" font-family="${config_file.sans_font_family}" font-size="${config_file.stereotype_font_size}" font-style="italic" fill="${config_file.stereotype_text_color}">«${escapeXml(p.block.kind)}»</text>`;
+  const nameY = stereotypeY + 8 + config_file.name_font_size;
+  out += `<text x="${cx}" y="${nameY}" text-anchor="middle" font-family="${config_file.mono_font_family}" font-size="${config_file.name_font_size}" font-weight="700" fill="${p.textColor}">${escapeXml(p.block.name)}</text>`;
 
   let cursorY = p.y + p.headerH;
   for (const members of p.sections) {
     if (members.length === 0) continue;
     out += separator(p.x, cursorY, p.w, p.stroke);
-    cursorY += SECTION_PAD;
+    cursorY += config_file.section_padding;
     for (const m of members) {
-      const textY = cursorY + ROW_HEIGHT / 2;
-      out += memberSvg(p.x + MEMBER_PAD_X, textY, p.textColor, m);
-      cursorY += ROW_HEIGHT;
+      const textY = cursorY + config_file.row_height / 2;
+      out += memberSvg(
+        p.x + config_file.member_padding_x,
+        textY,
+        p.textColor,
+        m,
+      );
+      cursorY += config_file.row_height;
     }
-    cursorY += SECTION_PAD;
+    cursorY += config_file.section_padding;
   }
 
   out += "</g>";
@@ -632,14 +626,20 @@ function depthSortedBlocks(diagram: Diagram): Block[] {
 // estimates text width from character count; good enough for monospace
 // in the browser this is the natural place to swap in canvas measureText
 function autoWidth(b: Block): number {
-  const nameW = [...b.name].length * NAME_SIZE * MONO_CHAR_RATIO;
+  const nameW =
+    [...b.name].length *
+    config_file.name_font_size *
+    config_file.mono_char_ratio;
   let contentW = nameW;
   for (const m of b.members) {
-    const w = [...formatMember(m)].length * MEMBER_SIZE * MONO_CHAR_RATIO;
+    const w =
+      [...formatMember(m)].length *
+      config_file.member_font_size *
+      config_file.mono_char_ratio;
     contentW = Math.max(contentW, w);
   }
-  const needed = contentW + 2 * MEMBER_PAD_X;
-  return Math.max(DEFAULT_W, Math.ceil(needed));
+  const needed = contentW + 2 * config_file.member_padding_x;
+  return Math.max(config_file.default_width, Math.ceil(needed));
 }
 
 // uml card sections: attributes on top, operations below
@@ -657,7 +657,7 @@ function separator(x: number, y: number, w: number, stroke: string): string {
 }
 
 function memberSvg(x: number, y: number, color: string, m: Member): string {
-  return `<text x="${x}" y="${y}" font-family="${MONO}" font-size="${MEMBER_SIZE}" fill="${color}" dominant-baseline="central">${escapeXml(formatMember(m))}</text>`;
+  return `<text x="${x}" y="${y}" font-family="${config_file.mono_font_family}" font-size="${config_file.member_font_size}" fill="${color}" dominant-baseline="central">${escapeXml(formatMember(m))}</text>`;
 }
 
 function formatMember(m: Member): string {
@@ -788,10 +788,7 @@ function argAsNumber(
 
 // geometry refs resolve against laid-out blocks; unknown blocks or
 // functions make the whole expression undefined so callers fall back
-function evalNumExpr(
-  e: NumExpr,
-  env: Map<string, Placed>,
-): number | undefined {
+function evalNumExpr(e: NumExpr, env: Map<string, Placed>): number | undefined {
   switch (e.op) {
     case "num":
       return e.value;
