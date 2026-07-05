@@ -3,7 +3,7 @@
 An interactive, high-performance UML diagram renderer and editor built with Next.js, React, and SVG. 
 This project allows you to visually render UML class diagrams, move classes around freely, manipulate relationship arrows, add waypoints, and export the final result as a clean, standalone `.svg` file.
 
-## 🚀 Key Features
+## Key Features
 
 - **High-Performance Dragging (120 FPS):** Dragging class boxes bypasses React's render cycle completely. It manipulates the DOM directly and communicates with connecting arrows via a custom Event Bus.
 - **Interactive Routing:** Arrows dynamically connect to the exact perimeter of the boxes, taking border-radius into account. You can drag the start/end points of the arrows to any position on the box's perimeter.
@@ -11,7 +11,7 @@ This project allows you to visually render UML class diagrams, move classes arou
 - **Auto-Save:** Diagram state (positions, arrow configurations, waypoints) is automatically saved back to the `uml_diagram.json` file on the server.
 - **SVG Export:** Export your diagram with a single click. Interactive elements (like red drag handles or blue selection highlights) are automatically stripped from the exported SVG, resulting in a clean, presentation-ready file.
 
-## 🏗️ Architecture & Core Components
+## Architecture & Core Components
 
 This application is built with a specific architecture designed to overcome React's performance limitations when rendering and dragging hundreds of SVG nodes.
 
@@ -43,20 +43,20 @@ To make arrows connect beautifully to the edges of the class boxes, we use preci
 - The portal targets an empty `<g id="interactive-overlay">` at the very end of the main SVG.
 - This guarantees that the interactive handles are always rendered **on top** of all other SVG elements (solving SVG's lack of `z-index`).
 
-## 💾 Auto-Save API
+## Auto-Save API
 
 The frontend automatically persists changes via the `POST /api/save` endpoint.
 - Handled by `src/app/api/save/route.ts`.
 - Updates `src/data/uml_diagram.json` natively on the filesystem.
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 - **Framework:** Next.js 14+ (App Router)
 - **UI:** React, TailwindCSS
 - **Rendering:** Vanilla SVG elements inside React
 - **Language:** TypeScript
 
-## 🏃‍♂️ Running Locally
+## Running Locally
 
 1. Install dependencies: `npm install`
 2. Start the development server: `npm run dev`
