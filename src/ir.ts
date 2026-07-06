@@ -30,6 +30,8 @@ export class Block {
   public members: Member[];
   public annotations: Annotation[];
   public span: Span;
+  // span of just the name identifier, used as an anchor for edits
+  public nameSpan: Span;
 
   constructor(
     kind: string = "class",
@@ -37,12 +39,14 @@ export class Block {
     members: Member[] = [],
     annotations: Annotation[] = [],
     span: Span = EMPTY_SPAN,
+    nameSpan: Span = EMPTY_SPAN,
   ) {
     this.kind = kind;
     this.name = name;
     this.members = members;
     this.annotations = annotations;
     this.span = span;
+    this.nameSpan = nameSpan;
   }
 }
 

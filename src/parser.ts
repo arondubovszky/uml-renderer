@@ -102,6 +102,7 @@ class Parser {
     this.skip();
     const nameStart = this.pos;
     const name = this.parseIdent();
+    const nameSpan: Span = { start: nameStart, end: this.pos };
     // a block with one of these names could never be referenced, since the
     // top-level dispatch would take it for a note/region
     if (name === "note" || name === "region") {
@@ -117,7 +118,14 @@ class Parser {
       members.push(this.parseMember());
     }
     this.expect("}");
-    return new Block(kind, name, members, annotations, this.spanFrom(start));
+    return new Block(
+      kind,
+      name,
+      members,
+      annotations,
+      this.spanFrom(start),
+      nameSpan,
+    );
   }
 
   // member = visibility? name params? return_type? annotation*
