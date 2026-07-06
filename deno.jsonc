@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "dev": "deno run --watch main.ts",
+    "example": "mkdir -p output && deno run --allow-read --allow-write main.ts example.uml -o output/example.svg",
+    // creating the exe
+    "compile": "deno compile --allow-read --allow-write -o umlcore main.ts",
+    // installing main.ts locally
+    "install": "deno install --global --allow-read --allow-write -n umlcore main.ts",
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1",
+  },
+}
