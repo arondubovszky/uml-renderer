@@ -1,4 +1,5 @@
 .zed/
+umlcore
 output/
 umlcore
 *.svg
