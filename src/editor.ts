@@ -1,4 +1,10 @@
-import { EditRequest, EditResult } from "./edits.ts";
+import {
+  applyTextEdits,
+  EditRequest,
+  EditResult,
+  mutateIR,
+  planEdit,
+} from "./edits.ts";
 import { Diagram } from "./ir.ts";
 import { parse } from "./parser.ts";
 import { render } from "./render.ts";
@@ -26,6 +32,11 @@ export class EditableDiagram {
   }
 
   edit(req: EditRequest): EditResult {
-    return { ok: false, error: "idk" };
+    const result = planEdit(req, this.ir);
+    if (!result.ok) return result;
+    // keep both representations in sync from the same request:
+    this.source = applyTextEdits(this.source, result.edits); // .uml text
+    mutateIR(this.ir, req); // live IR (so getSvg() needs no re-parse)
+    return result;
   }
 }

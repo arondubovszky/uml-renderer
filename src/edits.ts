@@ -1,5 +1,6 @@
 import {
   Annotation,
+  AnnotationArg,
   Block,
   Diagram,
   Member,
@@ -15,7 +16,8 @@ export interface Point {
 }
 
 export type TargetRef =
-  { kind: "block" | "region"; name: string } | { kind: "note"; span: Span };
+  | { kind: "block" | "region" | "note"; name: string }
+  | { kind: "note"; span: Span };
 
 export type EditKind =
   | "setPos"
@@ -132,5 +134,36 @@ export function planEdit(request: EditRequest, ir: Diagram): EditResult {
       const _never: never = request;
       return { ok: false, error: `unknown request: ${_never}` };
     }
+  }
+}
+
+export function mutateIR(ir: Diagram, request: EditRequest): void {
+  switch (request.type) {
+    case "setPos": {
+      const block = resolveTarget(ir, request.target);
+      if (!(block instanceof Block || block instanceof Note)) return; // regions are positioned via rects
+      const pos = block.annotations.find((a) => a.name === "pos");
+
+      const posArgs: AnnotationArg[] = [
+        { kind: "number", value: request.pos.x },
+        { kind: "number", value: request.pos.y },
+      ];
+
+      if (pos) {
+        pos.args = posArgs;
+      } else {
+        block.annotations.push(new Annotation("pos", posArgs));
+      }
+      break;
+    }
+    case "rename":
+    case "addMember":
+    case "removeMember":
+    case "addBlock":
+    case "removeBlock":
+    case "addRelationship":
+    case "removeRelationship":
+    case "setAnnotation":
+    case "reparent":
   }
 }
