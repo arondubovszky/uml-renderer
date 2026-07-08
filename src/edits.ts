@@ -16,8 +16,8 @@ export interface Point {
 }
 
 export type TargetRef =
-  | { kind: "block" | "region" | "note"; name: string }
-  | { kind: "note"; span: Span };
+  | { kind: "block" | "region"; name: string } // identified by name
+  | { kind: "note"; span: Span }; // notes have no name, so use the source span
 
 export type EditKind =
   | "setPos"
